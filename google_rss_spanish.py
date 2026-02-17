@@ -1,146 +1,162 @@
 import feedparser
 from datetime import datetime, timedelta
 import time
-import urllib.parse
-import difflib
-import csv
+import re
 
-# -------- LATAM REGIONS --------
-REGIONS = {
-    "colombia": {"hl": "es", "gl": "CO", "ceid": "CO:es"},
-    "peru": {"hl": "es", "gl": "PE", "ceid": "PE:es"},
-    "honduras": {"hl": "es", "gl": "HN", "ceid": "HN:es"},
-    "guatemala": {"hl": "es", "gl": "GT", "ceid": "GT:es"},
-    "ecuador": {"hl": "es", "gl": "EC", "ceid": "EC:es"}
-}
+# --- CONFIGURATION (SPANISH GOOGLE NEWS) ---
+RSS_BASE = "https://news.google.com/rss/search?q={query}&hl=es&gl=ES&ceid=ES:es"
 
-RSS = "https://news.google.com/rss/search?q={query}&hl={hl}&gl={gl}&ceid={ceid}"
+# --- TARGET COMPANIES (LATAM / AFRICA) ---
+TOP_COMPANIES = [
+    "Dinant",
+    "REPSA",
+    "Grupo HAME",
+    "Ocho Sur",
+    "Socfin",
+    "Poligrow",
+    "Daabon"
+]
 
-# -------- COMPANIES --------
-COMPANIES = {
-    "Dinant": ["Dinant", "Corporación Dinant"],
-    "Ocho Sur": ["Ocho Sur"],
-    "Poligrow": ["Poligrow"],
-    "Daabon": ["Grupo Daabon"],
-    "Palmas del Espino": ["Palmas del Espino", "Grupo Romero"]
-}
-
-# -------- NGOs --------
-NGOS = [
+# --- NGOs / Investigative orgs ---
+NGO = [
     "Mongabay Latam",
+    "Mongabay",
     "InfoAmazonia",
     "Global Witness",
     "Earthsight",
     "Greenpeace",
-    "Dejusticia"
+    "Dejusticia",
+    "Rainforest Action Network"
 ]
 
-# -------- ISSUES --------
+# --- ISSUES (SPANISH) ---
 ISSUES = [
     "deforestación",
-    "corrupción",
     "conflicto",
+    "corrupción",
     "derechos humanos",
     "comunidades indígenas",
     "incendios",
-    "contaminación"
+    "contaminación",
+    "despojo de tierras",
+    "trabajo forzoso"
 ]
 
+# --- COUNTRIES TARGET ---
+COUNTRY = [
+    "Colombia",
+    "Perú",
+    "Guatemala",
+    "Honduras",
+    "Brasil",
+    "Nigeria",
+    "Camerún"
+]
+
+# --- PALM TERMS ---
 PALM_TERMS = [
     "aceite de palma",
     "palma aceitera"
 ]
 
-DAYS_LIMIT = 30
-PAUSE = 1
+DAYS_LIMIT = 7
 
-# -------- FUNCTIONS --------
+# --- FUNCTIONS ---
+def fetch_news(query):
+    url = RSS_BASE.format(query=query.replace(" ", "+"))
+    return feedparser.parse(url).entries
 
-def build_url(query, cfg):
-    q = urllib.parse.quote_plus(query)
-    return RSS.format(query=q, **cfg)
-
-def is_recent(entry):
-    if hasattr(entry, "published_parsed") and entry.published_parsed:
+def is_recent(entry, days=DAYS_LIMIT):
+    if hasattr(entry, 'published_parsed') and entry.published_parsed:
         pub_date = datetime.fromtimestamp(time.mktime(entry.published_parsed))
-        return pub_date >= datetime.now() - timedelta(days=DAYS_LIMIT)
+        return pub_date >= datetime.now() - timedelta(days=days)
     return False
 
-def similarity(a, b):
-    return difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio()
+def normalize_title(title):
+    words = re.findall(r'\w+', title.lower())
+    return set(words)
 
-def deduplicate(items):
+def is_similar(title1, title2, min_common=3):
+    words1 = normalize_title(title1)
+    words2 = normalize_title(title2)
+    common = words1 & words2
+    return len(common) >= min_common
+
+def deduplicate(results):
     unique = []
-    urls = set()
-
-    for it in items:
-        if it["url"] in urls:
-            continue
-
-        dup = False
+    for r in results:
+        duplicate_found = False
         for u in unique:
-            if similarity(it["title"], u["title"]) > 0.85:
-                dup = True
+            if is_similar(r["title"], u["title"], min_common=4):
+                duplicate_found = True
                 break
-
-        if not dup:
-            unique.append(it)
-            urls.add(it["url"])
-
+        if not duplicate_found:
+            unique.append(r)
     return unique
 
-# -------- QUERY BUILDER --------
-
-def generate_queries():
-    queries = []
-
-    for palm in PALM_TERMS:
-        for issue in ISSUES:
-            queries.append(f"{palm} {issue}")
-
-            for ngo in NGOS:
-                queries.append(f"{palm} {issue} {ngo}")
-
-    for company, aliases in COMPANIES.items():
-        alias_part = " OR ".join([f'"{a}"' for a in aliases])
-
-        for issue in ISSUES:
-            queries.append(f"({alias_part}) {issue} aceite de palma")
-
-    return queries
-
-# -------- MAIN --------
-
-def main():
-    queries = generate_queries()
+def search_and_collect(queries, label):
     results = []
+    for q in queries:
+        print(f"\n🔍 Searching {label}: {q}")
+        entries = fetch_news(q)
+        for e in entries:
+            if is_recent(e):
+                results.append({
+                    "title": e.get("title", ""),
+                    "url": e.get("link", ""),
+                    "published": e.get("published", "Unknown"),
+                    "query": q
+                })
+        time.sleep(1)
+    return results
 
-    for region, cfg in REGIONS.items():
-        print("\nRegion:", region)
+# --- MAIN WORKFLOW ---
+def main():
+    all_results = []
 
-        for q in queries:
-            url = build_url(q, cfg)
-            entries = feedparser.parse(url).entries
+    # Pass 1: Palm oil + issue
+    palm_queries = [
+        f"{palm} {issue}"
+        for palm in PALM_TERMS
+        for issue in ISSUES
+    ]
+    all_results.extend(search_and_collect(palm_queries, "palm_issue"))
 
-            for e in entries:
-                if is_recent(e):
-                    results.append({
-                        "title": e.get("title"),
-                        "url": e.get("link"),
-                        "region": region,
-                        "query": q
-                    })
+    # Pass 2: Company + issue
+    company_queries = [
+        f"{company} {issue}"
+        for company in TOP_COMPANIES
+        for issue in ISSUES
+    ]
+    all_results.extend(search_and_collect(company_queries, "company_issue"))
 
-            time.sleep(PAUSE)
+    # Pass 3: Palm oil + country + issue
+    country_queries = [
+        f"{palm} {issue} {country}"
+        for palm in PALM_TERMS
+        for issue in ISSUES
+        for country in COUNTRY
+    ]
+    all_results.extend(search_and_collect(country_queries, "palm_country"))
 
-    final = deduplicate(results)
+    # Pass 4: Palm oil + NGO
+    ngo_queries = [
+        f"{palm} {ngo}"
+        for palm in PALM_TERMS
+        for ngo in NGO
+    ]
+    all_results.extend(search_and_collect(ngo_queries, "palm_ngo"))
 
-    print("\nTotal unique:", len(final))
+    # Deduplicate
+    final_results = deduplicate(all_results)
 
-    with open("latam_palm_news.csv", "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["title","url","region","query"])
-        writer.writeheader()
-        writer.writerows(final)
+    print(f"\n✅ Found {len(final_results)} unique Spanish palm oil articles.\n")
+
+    for idx, r in enumerate(final_results, 1):
+        print(f"[{idx}] {r['title']}")
+        print(f"   Published: {r['published']}")
+        print(f"   URL: {r['url']}")
+        print(f"   Query: {r['query']}\n")
 
 if __name__ == "__main__":
     main()
