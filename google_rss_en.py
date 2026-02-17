@@ -10,12 +10,12 @@ import re
 # --- CONFIGURATION ---
 RSS_BASE = "https://news.google.com/rss/search?q={query}&hl=en&gl=US&ceid=US:en"
 
-TOP_COMPANIES = ["Wilmar", "Dinant", "Musim Mas",  "Astra Agro Lestari"]
-NGO = ["Mongabay", "Reuters", "Mighty Earth", "Greenpeace", "Rainforest Action Network"]
-ISSUES = [ "deforestation", "conflict", "corruption", "human rights", "indigenous", 
-          "labor right", "fire", "pollution", "land dispute" ]
+TOP_COMPANIES = ["Wilmar", "First resources", "Mondelez",  "UNILEVER", "cargill", "Procter & Gamble", "Nestlé", "Golden Agro Resources", "F"]
+NGO = ["Reuters", "Mighty Earth", "Greenpeace", "mongabay", "Rainforest Action Network", "milieudefensie", 'forestpeoples','AidEnvironment']
+ISSUES = [ "deforestation", "conflict", "corruption", "human rights", "indigenous", "labor right", "fire", "pollution", "land dispute" , "eudr"]
+COUNTRY = ["Malaysia", "Honduras", "Liberia", "Colombia", "Thailand", "Cameroon", "Indonesia", "Nigeria", "Guatemala"]
 
-DAYS_LIMIT = 7
+DAYS_LIMIT = 14
 
 # --- FUNCTIONS ---
 def fetch_news(query):
@@ -81,6 +81,10 @@ def main():
     # Pass 3: Palm oil + issue + NGO
     ngo_queries = [f"palm oil {issue} {ngo}" for issue in ISSUES for ngo in NGO]
     all_results.extend(search_and_collect(ngo_queries, "palm_ngo"))
+
+    # Pass 4: Palm oil + Country
+    country_queries = [f"palm oil {country}" for country in COUNTRY]
+    all_results.extend(search_and_collect(country_queries, "palm_country"))
 
     # Deduplicate based on URL and title similarity
     final_results = deduplicate(all_results)
